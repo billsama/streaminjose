@@ -225,24 +225,43 @@
     .player-error p.title { margin: 0; color: var(--paper); font-weight: 700; font-size: 16px; }
     .player-error p.desc { margin: 0; color: var(--paper-muted); font-size: 13.5px; max-width: 380px; line-height: 1.5; }
 
-    /* ---------- Skin de Video.js a juego con el resto del sitio ---------- */
-    .video-js { width: 100%; height: 100%; font-family: var(--font-body); }
-    .video-js .vjs-tech { object-fit: contain; }
+    /* ---------- Skin de Video.js a juego con el resto del sitio ----------
+       Nota: video-js.min.css se descarga en tiempo de ejecución (después de
+       que esta hoja de estilos ya cargó), así que sin !important sus reglas
+       por defecto terminan ganando por orden de carga y el reproductor se ve
+       descuadrado (botón de play desplazado, tamaños distintos, etc). Por
+       eso estas reglas usan !important: es intencional, no un descuido. */
+    .player-wrap .video-js {
+      width: 100% !important; height: 100% !important; position: absolute !important; inset: 0 !important;
+      font-family: var(--font-body) !important;
+    }
+    .video-js .vjs-tech { object-fit: contain !important; width: 100% !important; height: 100% !important; }
     .video-js .vjs-big-play-button {
-      width: 76px; height: 76px; line-height: 76px; border-radius: 999px; border: none;
-      background: rgba(255,176,32,0.95); top: 50%; left: 50%; margin: -38px 0 0 -38px;
+      width: 76px !important; height: 76px !important; line-height: 76px !important;
+      border-radius: 999px !important; border: none !important;
+      background: rgba(255,176,32,0.95) !important;
+      position: absolute !important; top: 50% !important; left: 50% !important;
+      transform: translate(-50%, -50%) !important; margin: 0 !important;
       transition: transform 0.2s ease, background 0.2s ease;
     }
-    .video-js .vjs-big-play-button .vjs-icon-placeholder:before { color: var(--ink); font-size: 34px; line-height: 76px; }
-    .video-js:hover .vjs-big-play-button, .video-js .vjs-big-play-button:focus { background: #FFC24D; transform: scale(1.06); }
-    .video-js .vjs-control-bar { background: linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.4)); }
-    .video-js .vjs-play-progress, .video-js .vjs-volume-level { background: var(--marquee); }
-    .video-js .vjs-slider { background: rgba(255,255,255,0.2); }
-    .video-js .vjs-load-progress div { background: rgba(255,255,255,0.3); }
-    .video-js .vjs-loading-spinner { border-color: var(--marquee); }
-    .video-js .vjs-button > .vjs-icon-placeholder:before { line-height: 3em; }
+    .video-js .vjs-big-play-button .vjs-icon-placeholder:before {
+      color: var(--ink) !important; font-size: 34px !important; line-height: 76px !important;
+    }
+    .video-js:hover .vjs-big-play-button, .video-js .vjs-big-play-button:focus {
+      background: #FFC24D !important; transform: translate(-50%, -50%) scale(1.06) !important;
+    }
+    .video-js .vjs-control-bar {
+      background: linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.4)) !important;
+      width: 100% !important;
+    }
+    .video-js .vjs-play-progress, .video-js .vjs-volume-level { background: var(--marquee) !important; }
+    .video-js .vjs-slider { background: rgba(255,255,255,0.2) !important; }
+    .video-js .vjs-load-progress div { background: rgba(255,255,255,0.3) !important; }
+    .video-js .vjs-loading-spinner { border-color: var(--marquee) !important; }
+    .video-js .vjs-button > .vjs-icon-placeholder:before { line-height: 3em !important; }
     .video-js .vjs-control:focus, .video-js .vjs-control:focus-visible {
-      outline: 2px solid var(--marquee); outline-offset: -2px; text-shadow: none; box-shadow: none;
+      outline: 2px solid var(--marquee) !important; outline-offset: -2px !important;
+      text-shadow: none !important; box-shadow: none !important;
     }
 
     .video-title { font-family: var(--font-display); font-size: 30px; margin: 16px 0 6px; }
