@@ -601,7 +601,13 @@
       if (clean.endsWith('.ogg') || clean.endsWith('.ogv')) return 'video/ogg';
       if (clean.endsWith('.mov')) return 'video/quicktime';
       if (clean.endsWith('.m4v')) return 'video/x-m4v';
-      return 'video/mp4';
+      if (clean.endsWith('.mp4')) return 'video/mp4';
+      // Extensión desconocida o ausente: no forzamos un tipo. Es más seguro
+      // dejar que el navegador detecte el formato por sí mismo (a partir del
+      // Content-Type real que envía el servidor) que arriesgarnos a declarar
+      // un tipo incorrecto y que el navegador rechace un archivo que sí podía
+      // reproducir.
+      return null;
     }
 
     // La mayoría de "no reproduce en Apple TV / Android TV / TV box / Smart TV"
@@ -683,15 +689,17 @@
       video.setAttribute('playsinline', ''); // Safari / iOS / tvOS
       video.setAttribute('webkit-playsinline', ''); // iOS antiguo
       video.setAttribute('x5-playsinline', ''); // navegadores basados en X5 (algunos TV box Android)
-      video.setAttribute('crossorigin', 'anonymous');
       video.preload = 'metadata';
-      video.poster = '';
 
       const mime = guessMimeType(src);
       const source = document.createElement('source');
       source.src = src;
-      source.type = mime;
+      if (mime) source.type = mime;
       video.appendChild(source);
+      // Fuerza al navegador a re-evaluar las fuentes recién agregadas.
+      // Sin esto, varios navegadores (sobre todo en TV) se quedan en negro
+      // porque no detectan el <source> agregado dinámicamente.
+      video.load();
 
       const overlay = document.createElement('div');
       overlay.className = 'player-overlay';
