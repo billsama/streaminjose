@@ -163,26 +163,67 @@
     .back-link { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; color: var(--paper-muted); margin-bottom: 12px; }
     .back-link:hover { color: var(--marquee); }
 
-    .player-wrap { position: relative; aspect-ratio: 16/9; background: #000; border: 1px solid var(--ink-600); border-radius: 10px; overflow: hidden; }
-    .player-wrap video, .player-wrap iframe { width: 100%; height: 100%; border: none; display: block; }
+    .player-wrap {
+      position: relative; aspect-ratio: 16/9; background: #000;
+      border: 1px solid var(--ink-600); border-radius: 14px; overflow: hidden;
+      box-shadow: 0 20px 60px -20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.03) inset;
+    }
+    .player-wrap video, .player-wrap iframe { width: 100%; height: 100%; border: none; display: block; background: #000; }
     /* Los controles del <video> son los NATIVOS del sistema operativo/navegador.
        Esto es intencional: es lo único que funciona de forma consistente con
        controles remotos de TV (Apple TV, Android TV, Tizen, WebOS, TV box). */
     .player-overlay {
       position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.2); cursor: pointer;
+      cursor: pointer; background-size: cover; background-position: center;
+      transition: opacity 0.35s ease;
+    }
+    .player-overlay::before {
+      content: ''; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse at center, rgba(11,12,16,0.15) 0%, rgba(11,12,16,0.65) 75%),
+        linear-gradient(to top, rgba(11,12,16,0.95) 0%, rgba(11,12,16,0.15) 45%, rgba(11,12,16,0.35) 100%);
     }
     .player-overlay span {
-      width: 64px; height: 64px; border-radius: 999px; background: rgba(255,176,32,0.9); color: var(--ink);
-      display: flex; align-items: center; justify-content: center; font-size: 22px;
+      position: relative; z-index: 1;
+      width: 76px; height: 76px; border-radius: 999px;
+      background: rgba(255,176,32,0.95); color: var(--ink);
+      display: flex; align-items: center; justify-content: center; font-size: 24px;
+      box-shadow: 0 0 0 0 rgba(255,176,32,0.5), 0 8px 24px -6px rgba(255,176,32,0.6);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+      animation: pulseRing 2.4s ease-out infinite;
     }
+    .player-overlay:hover span, .player-overlay:focus-visible span {
+      transform: scale(1.08); background: #FFC24D;
+    }
+    .player-overlay:focus-visible { outline: none; }
+    .player-overlay:focus-visible span { box-shadow: 0 0 0 4px rgba(255,176,32,0.35), 0 8px 24px -6px rgba(255,176,32,0.6); }
+    @keyframes pulseRing {
+      0% { box-shadow: 0 0 0 0 rgba(255,176,32,0.45), 0 8px 24px -6px rgba(255,176,32,0.6); }
+      70% { box-shadow: 0 0 0 18px rgba(255,176,32,0), 0 8px 24px -6px rgba(255,176,32,0.6); }
+      100% { box-shadow: 0 0 0 0 rgba(255,176,32,0), 0 8px 24px -6px rgba(255,176,32,0.6); }
+    }
+    .player-spinner {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      pointer-events: none; z-index: 2;
+    }
+    .player-spinner span {
+      width: 40px; height: 40px; border-radius: 999px;
+      border: 3px solid rgba(255,255,255,0.15); border-top-color: var(--marquee);
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .player-error {
       position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
-      justify-content: center; text-align: center; padding: 24px; gap: 12px; background: var(--ink-800);
+      justify-content: center; text-align: center; padding: 32px; gap: 14px;
+      background: radial-gradient(circle at 50% 30%, var(--ink-700) 0%, var(--ink-800) 100%);
     }
-    .player-error span.icon { font-size: 32px; }
-    .player-error p.title { margin: 0; color: var(--paper); font-weight: 600; }
-    .player-error p.desc { margin: 0; color: var(--paper-muted); font-size: 14px; max-width: 380px; }
+    .player-error span.icon {
+      width: 56px; height: 56px; border-radius: 999px; font-size: 24px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255,90,90,0.12); color: #FF8080;
+    }
+    .player-error p.title { margin: 0; color: var(--paper); font-weight: 700; font-size: 16px; }
+    .player-error p.desc { margin: 0; color: var(--paper-muted); font-size: 13.5px; max-width: 380px; line-height: 1.5; }
 
     .video-title { font-family: var(--font-display); font-size: 30px; margin: 16px 0 6px; }
     .video-cat { display: inline-block; background: var(--ink-800); color: var(--marquee); font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; padding: 4px 8px; border-radius: 3px; }
@@ -508,7 +549,7 @@
         catEl.classList.add('hidden');
       }
 
-      buildPlayer(video.videoUrl);
+      buildPlayer(video.videoUrl, video.imageUrl);
 
       const related = videos.filter((v) => String(v.id) !== String(id)).slice(0, 8);
       const relatedGrid = document.getElementById('relatedGrid');
@@ -641,7 +682,7 @@
         '</div>';
     }
 
-    function buildPlayer(src) {
+    function buildPlayer(src, posterUrl) {
       const wrap = document.getElementById('playerWrap');
       wrap.innerHTML = '';
       if (!src) return;
@@ -690,6 +731,7 @@
       video.setAttribute('webkit-playsinline', ''); // iOS antiguo
       video.setAttribute('x5-playsinline', ''); // navegadores basados en X5 (algunos TV box Android)
       video.preload = 'metadata';
+      if (posterUrl) video.poster = posterUrl;
 
       const mime = guessMimeType(src);
       const source = document.createElement('source');
@@ -707,16 +749,28 @@
       overlay.setAttribute('role', 'button');
       overlay.setAttribute('aria-label', 'Reproducir video');
       overlay.innerHTML = '<span>▶</span>';
+      if (posterUrl) overlay.style.backgroundImage = 'url("' + posterUrl.replace(/"/g, '') + '")';
+
+      const spinner = document.createElement('div');
+      spinner.className = 'player-spinner hidden';
+      spinner.innerHTML = '<span></span>';
 
       wrap.appendChild(video);
       wrap.appendChild(overlay);
+      wrap.appendChild(spinner);
+
+      video.addEventListener('waiting', function () { spinner.classList.remove('hidden'); });
+      video.addEventListener('playing', function () { spinner.classList.add('hidden'); });
+      video.addEventListener('canplay', function () { spinner.classList.add('hidden'); });
 
       function startPlayback() {
+        spinner.classList.remove('hidden');
         const p = video.play();
         if (p && typeof p.catch === 'function') {
           p.then(function () {
             overlay.classList.add('hidden');
           }).catch(function () {
+            spinner.classList.add('hidden');
             // Algunos navegadores de TV exigen una interacción más directa;
             // dejamos el overlay visible para que el usuario pueda reintentar
             // con el control remoto (Enter/OK sobre el overlay enfocado).
