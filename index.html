@@ -225,6 +225,26 @@
     .player-error p.title { margin: 0; color: var(--paper); font-weight: 700; font-size: 16px; }
     .player-error p.desc { margin: 0; color: var(--paper-muted); font-size: 13.5px; max-width: 380px; line-height: 1.5; }
 
+    /* ---------- Skin de Video.js a juego con el resto del sitio ---------- */
+    .video-js { width: 100%; height: 100%; font-family: var(--font-body); }
+    .video-js .vjs-tech { object-fit: contain; }
+    .video-js .vjs-big-play-button {
+      width: 76px; height: 76px; line-height: 76px; border-radius: 999px; border: none;
+      background: rgba(255,176,32,0.95); top: 50%; left: 50%; margin: -38px 0 0 -38px;
+      transition: transform 0.2s ease, background 0.2s ease;
+    }
+    .video-js .vjs-big-play-button .vjs-icon-placeholder:before { color: var(--ink); font-size: 34px; line-height: 76px; }
+    .video-js:hover .vjs-big-play-button, .video-js .vjs-big-play-button:focus { background: #FFC24D; transform: scale(1.06); }
+    .video-js .vjs-control-bar { background: linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.4)); }
+    .video-js .vjs-play-progress, .video-js .vjs-volume-level { background: var(--marquee); }
+    .video-js .vjs-slider { background: rgba(255,255,255,0.2); }
+    .video-js .vjs-load-progress div { background: rgba(255,255,255,0.3); }
+    .video-js .vjs-loading-spinner { border-color: var(--marquee); }
+    .video-js .vjs-button > .vjs-icon-placeholder:before { line-height: 3em; }
+    .video-js .vjs-control:focus, .video-js .vjs-control:focus-visible {
+      outline: 2px solid var(--marquee); outline-offset: -2px; text-shadow: none; box-shadow: none;
+    }
+
     .video-title { font-family: var(--font-display); font-size: 30px; margin: 16px 0 6px; }
     .video-cat { display: inline-block; background: var(--ink-800); color: var(--marquee); font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; padding: 4px 8px; border-radius: 3px; }
     .video-desc { color: var(--paper-muted); white-space: pre-line; margin-top: 12px; }
@@ -433,8 +453,9 @@
       document.getElementById('searchBox').classList.toggle('hidden', name !== 'home');
     }
 
-    function goHome() { showView('home'); renderHome(); }
+    function goHome() { disposeCurrentPlayer(); showView('home'); renderHome(); }
     function goAdmin() {
+      disposeCurrentPlayer();
       showView('admin');
       const gate = document.getElementById('adminGate');
       const panel = document.getElementById('adminPanel');
@@ -682,80 +703,108 @@
         '</div>';
     }
 
-    // ---- Soporte HLS (.m3u8) para navegadores que no lo tocan de forma nativa ----
-    // Safari/WebKit (iPhone, iPad, Mac, y las apps de navegador en Apple TV)
-    // reproducen HLS de forma NATIVA sin ninguna librería. Los navegadores
-    // basados en Chromium (Android TV, TV box genérico, la mayoría de Smart TV
-    // como Tizen/WebOS) NO tienen esa capacidad incorporada: necesitan
-    // hls.js, que descompone el .m3u8 y lo alimenta al <video> por partes
-    // usando Media Source Extensions. Por eso el streaming HLS se veía negro
-    // en TV que no fueran Apple: no era un bug de nuestro código, faltaba
-    // esta pieza. Se carga solo cuando realmente se necesita (bajo demanda).
-    let hlsJsPromise = null;
-    function loadHlsJs() {
-      if (hlsJsPromise) return hlsJsPromise;
-      hlsJsPromise = new Promise(function (resolve, reject) {
-        if (window.Hls) { resolve(window.Hls); return; }
-        const tag = document.createElement('script');
-        tag.src = 'https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js';
-        tag.onload = function () { resolve(window.Hls); };
-        tag.onerror = function () { reject(new Error('No se pudo cargar hls.js')); };
-        document.head.appendChild(tag);
+    // ---- Reproductor MP4/HLS con Video.js -------------------------------
+    // En vez de mantener nuestra propia lógica de compatibilidad (controles,
+    // detección de HLS, fullscreen en iOS/tvOS, etc.), usamos Video.js: una
+    // librería open source madura y muy usada en producción, que ya resuelve
+    // todos esos casos límite por nosotros. Esto reduce el riesgo de que un
+    // ajuste nuestro rompa la reproducción en algún dispositivo específico.
+    //   - HLS (.m3u8): Video.js usa el soporte nativo de Safari/tvOS cuando
+    //     existe, y si no, activa automáticamente su propio motor (VHS) para
+    //     Android TV / Smart TV / TV box con Chromium.
+    //   - Fullscreen y controles: maneja internamente las diferencias entre
+    //     plataformas (incluida la limitación de iOS/tvOS) y sus botones son
+    //     elementos <button> reales, navegables con el control remoto (D-pad).
+    let vjsAssetsPromise = null;
+    function loadVideoJs() {
+      if (vjsAssetsPromise) return vjsAssetsPromise;
+      vjsAssetsPromise = new Promise(function (resolve, reject) {
+        if (window.videojs) { resolve(window.videojs); return; }
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/video.js@8/dist/video-js.min.css';
+        document.head.appendChild(link);
+
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/video.js@8/dist/video.min.js';
+        script.onload = function () { resolve(window.videojs); };
+        script.onerror = function () { reject(new Error('No se pudo cargar video.js')); };
+        document.head.appendChild(script);
       });
-      return hlsJsPromise;
+      return vjsAssetsPromise;
     }
 
-    function attachHlsSource(video, src, wrap) {
-      // 1) Si el propio navegador ya sabe reproducir HLS de forma nativa
-      //    (Safari en iPhone/iPad/Mac, apps de navegador en Apple TV), lo
-      //    dejamos así: es la ruta más simple y más compatible con TV.
-      const canNative = video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL');
-      if (canNative) {
-        const source = document.createElement('source');
-        source.src = src;
-        source.type = 'application/x-mpegURL';
-        video.appendChild(source);
-        video.load();
-        return;
+    // Referencia a la instancia activa, para poder destruirla correctamente
+    // (dispose) cada vez que se navega a otro video. No hacerlo deja procesos
+    // de video.js corriendo en segundo plano y puede causar errores extraños.
+    let currentVjsPlayer = null;
+    function disposeCurrentPlayer() {
+      if (currentVjsPlayer) {
+        try { currentVjsPlayer.dispose(); } catch (e) { /* ya destruido */ }
+        currentVjsPlayer = null;
       }
+    }
 
-      // 2) Para el resto (Android TV, Smart TV, TV box con Chromium), usamos
-      //    hls.js como respaldo automático.
-      loadHlsJs()
-        .then(function (Hls) {
-          // El usuario pudo haber navegado a otro video mientras hls.js
-          // terminaba de descargarse; si ya no es el video visible, no tocamos el wrap.
-          if (video.parentElement !== wrap) return;
-          if (!Hls || !Hls.isSupported()) {
+    function buildNativePlayer(wrap, src, posterUrl) {
+      const spinner = document.createElement('div');
+      spinner.className = 'player-spinner';
+      spinner.innerHTML = '<span></span>';
+      wrap.appendChild(spinner);
+
+      loadVideoJs()
+        .then(function (videojs) {
+          // El usuario pudo haber navegado a otro video mientras video.js
+          // terminaba de descargarse; si el wrap ya no tiene el spinner que
+          // pusimos, es que ya no aplica.
+          if (!wrap.contains(spinner)) return;
+          wrap.innerHTML = '';
+
+          const videoEl = document.createElement('video');
+          videoEl.id = 'vjs-player-' + Date.now();
+          videoEl.className = 'video-js vjs-big-play-centered';
+          videoEl.setAttribute('playsinline', '');
+          videoEl.setAttribute('webkit-playsinline', '');
+          wrap.appendChild(videoEl);
+
+          const mime = guessMimeType(src);
+          const sourceObj = { src: src };
+          if (mime) sourceObj.type = mime;
+
+          currentVjsPlayer = videojs(videoEl, {
+            controls: true,
+            autoplay: false,
+            preload: 'auto',
+            playsinline: true,
+            fluid: false,
+            fill: true,
+            poster: posterUrl || '',
+            sources: [sourceObj],
+            html5: {
+              vhs: { overrideNative: true },
+              nativeAudioTracks: false,
+              nativeVideoTracks: false,
+            },
+          });
+
+          // Si el archivo no se puede reproducir (códec no soportado, enlace
+          // roto, etc.) mostramos nuestro propio mensaje en español en vez
+          // del mensaje genérico en inglés de la librería.
+          currentVjsPlayer.on('error', function () {
+            disposeCurrentPlayer();
             showPlayerError(
               wrap,
-              'Este dispositivo no puede reproducir este video',
-              'El video usa streaming HLS y este navegador no lo soporta ni siquiera con librería de respaldo. Usa un archivo MP4 (H.264 + AAC) para máxima compatibilidad con TV.',
+              'Video no disponible para reproducir aquí',
+              'Este dispositivo no pudo reproducir el archivo. La causa más común es un formato o códec no compatible: usa MP4 (H.264 + AAC) para máxima compatibilidad con TV.',
               src
             );
-            return;
-          }
-          const hls = new Hls();
-          hls.loadSource(src);
-          hls.attachMedia(video);
-          hls.on(Hls.Events.ERROR, function (event, data) {
-            if (video.parentElement !== wrap) return;
-            if (data && data.fatal) {
-              showPlayerError(
-                wrap,
-                'Video no disponible para reproducir aquí',
-                'Hubo un error cargando el streaming HLS en este dispositivo. Prueba con un archivo MP4 (H.264 + AAC) para máxima compatibilidad.',
-                src
-              );
-            }
           });
         })
         .catch(function () {
-          if (video.parentElement !== wrap) return;
+          if (!wrap.contains(spinner)) return;
           showPlayerError(
             wrap,
             'No se pudo cargar el reproductor',
-            'Este dispositivo no logró descargar el componente necesario para reproducir streaming HLS. Usa un archivo MP4 para máxima compatibilidad con TV.',
+            'No se pudo descargar el componente del reproductor de video. Revisa tu conexión e intenta de nuevo.',
             src
           );
         });
@@ -763,6 +812,7 @@
 
     function buildPlayer(src, posterUrl) {
       const wrap = document.getElementById('playerWrap');
+      disposeCurrentPlayer();
       wrap.innerHTML = '';
       if (!src) return;
 
@@ -798,93 +848,7 @@
         return;
       }
 
-      // ---- Reproductor de video propio (MP4 / HLS / enlaces directos) ----
-      // Se usan los controles NATIVOS del navegador (atributo "controls") en
-      // vez de botones hechos a mano: es la única forma de garantizar que el
-      // control remoto de cualquier TV (foco por D-pad) pueda pausar, mover
-      // la barra de progreso, cambiar volumen y entrar a pantalla completa.
-      const video = document.createElement('video');
-      video.controls = true;
-      video.playsInline = true;
-      video.setAttribute('playsinline', ''); // Safari / iOS / tvOS
-      video.setAttribute('webkit-playsinline', ''); // iOS antiguo
-      video.setAttribute('x5-playsinline', ''); // navegadores basados en X5 (algunos TV box Android)
-      video.preload = 'auto'; // Empieza a descargar el video apenas se abre la página, no cuando se hace clic en play — así arranca más rápido.
-      if (posterUrl) video.poster = posterUrl;
-
-      const mime = guessMimeType(src);
-
-      if (mime === 'application/x-mpegURL') {
-        attachHlsSource(video, src, wrap);
-      } else {
-        const source = document.createElement('source');
-        source.src = src;
-        if (mime) source.type = mime;
-        video.appendChild(source);
-        // Fuerza al navegador a re-evaluar las fuentes recién agregadas.
-        // Sin esto, varios navegadores (sobre todo en TV) se quedan en negro
-        // porque no detectan el <source> agregado dinámicamente.
-        video.load();
-      }
-
-      const overlay = document.createElement('div');
-      overlay.className = 'player-overlay';
-      overlay.setAttribute('tabindex', '0');
-      overlay.setAttribute('role', 'button');
-      overlay.setAttribute('aria-label', 'Reproducir video');
-      overlay.innerHTML = '<span>▶</span>';
-      if (posterUrl) overlay.style.backgroundImage = 'url("' + posterUrl.replace(/"/g, '') + '")';
-
-      const spinner = document.createElement('div');
-      spinner.className = 'player-spinner hidden';
-      spinner.innerHTML = '<span></span>';
-
-      wrap.appendChild(video);
-      wrap.appendChild(overlay);
-      wrap.appendChild(spinner);
-
-      video.addEventListener('waiting', function () { spinner.classList.remove('hidden'); });
-      video.addEventListener('playing', function () { spinner.classList.add('hidden'); });
-      video.addEventListener('canplay', function () { spinner.classList.add('hidden'); });
-
-      function startPlayback() {
-        spinner.classList.remove('hidden');
-        const p = video.play();
-        if (p && typeof p.catch === 'function') {
-          p.then(function () {
-            overlay.classList.add('hidden');
-          }).catch(function () {
-            spinner.classList.add('hidden');
-            // Algunos navegadores de TV exigen una interacción más directa;
-            // dejamos el overlay visible para que el usuario pueda reintentar
-            // con el control remoto (Enter/OK sobre el overlay enfocado).
-          });
-        } else {
-          overlay.classList.add('hidden');
-        }
-      }
-      overlay.addEventListener('click', startPlayback);
-      overlay.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13) {
-          e.preventDefault();
-          startPlayback();
-        }
-      });
-      video.addEventListener('play', function () { overlay.classList.add('hidden'); });
-      video.addEventListener('pause', function () { overlay.classList.remove('hidden'); });
-      video.addEventListener('ended', function () { overlay.classList.remove('hidden'); });
-
-      // Si el archivo no se puede reproducir (códec no soportado, enlace
-      // roto, CORS, etc.) mostramos un mensaje claro en vez de una pantalla
-      // negra silenciosa, que es lo que suele pasar en TV.
-      video.addEventListener('error', function () {
-        showPlayerError(
-          wrap,
-          'Video no disponible para reproducir aquí',
-          'Este televisor/dispositivo no pudo reproducir el archivo. La causa más común es un formato o códec no compatible: usa MP4 (H.264 + AAC) para máxima compatibilidad con TV.',
-          src
-        );
-      });
+      buildNativePlayer(wrap, src, posterUrl);
     }
 
     // ---------------- ADMIN: LOGIN ----------------
