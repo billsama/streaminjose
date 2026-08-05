@@ -798,11 +798,13 @@
             fill: true,
             poster: posterUrl || '',
             sources: [sourceObj],
-            html5: {
-              vhs: { overrideNative: true },
-              nativeAudioTracks: false,
-              nativeVideoTracks: false,
-            },
+            // Sin overrides de "html5": dejamos que Video.js decida por sí
+            // mismo, según el navegador, si usa reproducción nativa o su
+            // motor propio (VHS) para HLS. Forzar nativeAudioTracks/
+            // nativeVideoTracks en false es justo lo que Video.js recomienda
+            // NO hacer en Safari/iOS/tvOS: rompe la reproducción nativa y
+            // provoca el error de "formato no compatible" aunque el archivo
+            // sí sea un MP4 válido.
           });
 
           // Si el archivo no se puede reproducir (códec no soportado, enlace
