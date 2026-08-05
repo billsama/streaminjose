@@ -288,7 +288,7 @@
     <!-- ============ VISTA: HOME ============ -->
     <section id="view-home">
       <div class="hero hidden" id="hero">
-        <img id="heroImg" src="" alt="">
+        <img id="heroImg" src="" alt="" fetchpriority="high" decoding="async">
         <div class="hero-gradient"></div>
         <div class="hero-content">
           <div class="eyebrow">En cartelera</div>
@@ -517,7 +517,7 @@
       card.onclick = function () { openVideo(v.id); };
       card.innerHTML =
         '<div class="card-thumb">' +
-          (v.imageUrl ? '<img src="' + escapeAttr(v.imageUrl) + '" alt="">' : '<div class="no-thumb">Sin miniatura</div>') +
+          (v.imageUrl ? '<img src="' + escapeAttr(v.imageUrl) + '" alt="" loading="lazy" decoding="async">' : '<div class="no-thumb">Sin miniatura</div>') +
           (v.category ? '<span class="card-cat">' + escapeHtml(v.category) + '</span>' : '') +
           '<div class="card-play"><span>▶</span></div>' +
         '</div>' +
@@ -682,6 +682,85 @@
         '</div>';
     }
 
+    // ---- Soporte HLS (.m3u8) para navegadores que no lo tocan de forma nativa ----
+    // Safari/WebKit (iPhone, iPad, Mac, y las apps de navegador en Apple TV)
+    // reproducen HLS de forma NATIVA sin ninguna librería. Los navegadores
+    // basados en Chromium (Android TV, TV box genérico, la mayoría de Smart TV
+    // como Tizen/WebOS) NO tienen esa capacidad incorporada: necesitan
+    // hls.js, que descompone el .m3u8 y lo alimenta al <video> por partes
+    // usando Media Source Extensions. Por eso el streaming HLS se veía negro
+    // en TV que no fueran Apple: no era un bug de nuestro código, faltaba
+    // esta pieza. Se carga solo cuando realmente se necesita (bajo demanda).
+    let hlsJsPromise = null;
+    function loadHlsJs() {
+      if (hlsJsPromise) return hlsJsPromise;
+      hlsJsPromise = new Promise(function (resolve, reject) {
+        if (window.Hls) { resolve(window.Hls); return; }
+        const tag = document.createElement('script');
+        tag.src = 'https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js';
+        tag.onload = function () { resolve(window.Hls); };
+        tag.onerror = function () { reject(new Error('No se pudo cargar hls.js')); };
+        document.head.appendChild(tag);
+      });
+      return hlsJsPromise;
+    }
+
+    function attachHlsSource(video, src, wrap) {
+      // 1) Si el propio navegador ya sabe reproducir HLS de forma nativa
+      //    (Safari en iPhone/iPad/Mac, apps de navegador en Apple TV), lo
+      //    dejamos así: es la ruta más simple y más compatible con TV.
+      const canNative = video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL');
+      if (canNative) {
+        const source = document.createElement('source');
+        source.src = src;
+        source.type = 'application/x-mpegURL';
+        video.appendChild(source);
+        video.load();
+        return;
+      }
+
+      // 2) Para el resto (Android TV, Smart TV, TV box con Chromium), usamos
+      //    hls.js como respaldo automático.
+      loadHlsJs()
+        .then(function (Hls) {
+          // El usuario pudo haber navegado a otro video mientras hls.js
+          // terminaba de descargarse; si ya no es el video visible, no tocamos el wrap.
+          if (video.parentElement !== wrap) return;
+          if (!Hls || !Hls.isSupported()) {
+            showPlayerError(
+              wrap,
+              'Este dispositivo no puede reproducir este video',
+              'El video usa streaming HLS y este navegador no lo soporta ni siquiera con librería de respaldo. Usa un archivo MP4 (H.264 + AAC) para máxima compatibilidad con TV.',
+              src
+            );
+            return;
+          }
+          const hls = new Hls();
+          hls.loadSource(src);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.ERROR, function (event, data) {
+            if (video.parentElement !== wrap) return;
+            if (data && data.fatal) {
+              showPlayerError(
+                wrap,
+                'Video no disponible para reproducir aquí',
+                'Hubo un error cargando el streaming HLS en este dispositivo. Prueba con un archivo MP4 (H.264 + AAC) para máxima compatibilidad.',
+                src
+              );
+            }
+          });
+        })
+        .catch(function () {
+          if (video.parentElement !== wrap) return;
+          showPlayerError(
+            wrap,
+            'No se pudo cargar el reproductor',
+            'Este dispositivo no logró descargar el componente necesario para reproducir streaming HLS. Usa un archivo MP4 para máxima compatibilidad con TV.',
+            src
+          );
+        });
+    }
+
     function buildPlayer(src, posterUrl) {
       const wrap = document.getElementById('playerWrap');
       wrap.innerHTML = '';
@@ -730,18 +809,23 @@
       video.setAttribute('playsinline', ''); // Safari / iOS / tvOS
       video.setAttribute('webkit-playsinline', ''); // iOS antiguo
       video.setAttribute('x5-playsinline', ''); // navegadores basados en X5 (algunos TV box Android)
-      video.preload = 'metadata';
+      video.preload = 'auto'; // Empieza a descargar el video apenas se abre la página, no cuando se hace clic en play — así arranca más rápido.
       if (posterUrl) video.poster = posterUrl;
 
       const mime = guessMimeType(src);
-      const source = document.createElement('source');
-      source.src = src;
-      if (mime) source.type = mime;
-      video.appendChild(source);
-      // Fuerza al navegador a re-evaluar las fuentes recién agregadas.
-      // Sin esto, varios navegadores (sobre todo en TV) se quedan en negro
-      // porque no detectan el <source> agregado dinámicamente.
-      video.load();
+
+      if (mime === 'application/x-mpegURL') {
+        attachHlsSource(video, src, wrap);
+      } else {
+        const source = document.createElement('source');
+        source.src = src;
+        if (mime) source.type = mime;
+        video.appendChild(source);
+        // Fuerza al navegador a re-evaluar las fuentes recién agregadas.
+        // Sin esto, varios navegadores (sobre todo en TV) se quedan en negro
+        // porque no detectan el <source> agregado dinámicamente.
+        video.load();
+      }
 
       const overlay = document.createElement('div');
       overlay.className = 'player-overlay';
