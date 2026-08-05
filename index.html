@@ -164,27 +164,25 @@
     .back-link:hover { color: var(--marquee); }
 
     .player-wrap { position: relative; aspect-ratio: 16/9; background: #000; border: 1px solid var(--ink-600); border-radius: 10px; overflow: hidden; }
-    .player-wrap video, .player-wrap iframe { width: 100%; height: 100%; border: none; }
+    .player-wrap video, .player-wrap iframe { width: 100%; height: 100%; border: none; display: block; }
+    /* Los controles del <video> son los NATIVOS del sistema operativo/navegador.
+       Esto es intencional: es lo único que funciona de forma consistente con
+       controles remotos de TV (Apple TV, Android TV, Tizen, WebOS, TV box). */
     .player-overlay {
       position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.2);
+      background: rgba(0,0,0,0.2); cursor: pointer;
     }
     .player-overlay span {
       width: 64px; height: 64px; border-radius: 999px; background: rgba(255,176,32,0.9); color: var(--ink);
       display: flex; align-items: center; justify-content: center; font-size: 22px;
     }
-    .controls-bar {
-      position: absolute; left: 0; right: 0; bottom: 0; padding: 30px 16px 12px;
-      background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
-      opacity: 0; transition: opacity 0.2s;
+    .player-error {
+      position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center; padding: 24px; gap: 12px; background: var(--ink-800);
     }
-    .player-wrap:hover .controls-bar, .controls-bar:focus-within { opacity: 1; }
-    .progress-bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,0.2); cursor: pointer; margin-bottom: 8px; }
-    .progress-fill { height: 100%; border-radius: 999px; background: var(--marquee); width: 0%; }
-    .controls-row { display: flex; align-items: center; gap: 12px; color: var(--paper); }
-    .controls-row button { background: none; border: none; color: var(--paper); font-size: 16px; }
-    .controls-row input[type=range] { width: 80px; accent-color: var(--marquee); }
-    .time-label { font-family: var(--font-mono); font-size: 12px; color: var(--paper-muted); }
+    .player-error span.icon { font-size: 32px; }
+    .player-error p.title { margin: 0; color: var(--paper); font-weight: 600; }
+    .player-error p.desc { margin: 0; color: var(--paper-muted); font-size: 14px; max-width: 380px; }
 
     .video-title { font-family: var(--font-display); font-size: 30px; margin: 16px 0 6px; }
     .video-cat { display: inline-block; background: var(--ink-800); color: var(--marquee); font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; padding: 4px 8px; border-radius: 3px; }
@@ -577,7 +575,7 @@
 
         new YT.Player(holderId, {
           videoId: videoId,
-          playerVars: { autoplay: 0, playsinline: 1 },
+          playerVars: { autoplay: 0, playsinline: 1, rel: 0, fs: 1 },
           events: {
             onError: function (event) {
               // 101 y 150: embebido deshabilitado por el titular de derechos.
@@ -591,94 +589,155 @@
       });
     }
 
+    // Detecta el tipo MIME a partir de la extensión del archivo, para que el
+    // navegador (sobre todo en TV/Smart TV, que son mucho más estrictos que
+    // un navegador de escritorio) sepa exactamente qué está recibiendo antes
+    // de intentar reproducirlo.
+    function guessMimeType(url) {
+      const clean = (url || '').split('?')[0].split('#')[0].toLowerCase();
+      if (clean.endsWith('.m3u8')) return 'application/x-mpegURL';
+      if (clean.endsWith('.mpd')) return 'application/dash+xml';
+      if (clean.endsWith('.webm')) return 'video/webm';
+      if (clean.endsWith('.ogg') || clean.endsWith('.ogv')) return 'video/ogg';
+      if (clean.endsWith('.mov')) return 'video/quicktime';
+      if (clean.endsWith('.m4v')) return 'video/x-m4v';
+      return 'video/mp4';
+    }
+
+    // La mayoría de "no reproduce en Apple TV / Android TV / TV box / Smart TV"
+    // se debe a una de estas causas, en este orden de frecuencia:
+    //  1) Contenido mixto: la página va por HTTPS pero el video está en HTTP.
+    //     Todos los navegadores de TV modernos lo bloquean en silencio.
+    //  2) Controles hechos a mano en JS: los mandos a distancia de TV navegan
+    //     por foco/teclas (D-pad), no por "click" de mouse, y muchos webviews
+    //     de TV no dejan disparar fullscreen desde un div genérico. Por eso
+    //     este reproductor usa los controles NATIVOS del <video>, que sí están
+    //     garantizados a funcionar con el control remoto en cualquier TV.
+    //  3) Formato/códec no compatible: la opción más segura y universal es
+    //     MP4 con video H.264 y audio AAC. WebM/VP9/AV1 no siempre están
+    //     disponibles en televisores.
+    function isMixedContent(url) {
+      try {
+        const u = new URL(url, window.location.href);
+        return window.location.protocol === 'https:' && u.protocol === 'http:';
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function showPlayerError(wrap, title, desc, videoUrl) {
+      wrap.innerHTML =
+        '<div class="player-error">' +
+          '<span class="icon">🚫</span>' +
+          '<p class="title">' + escapeHtml(title) + '</p>' +
+          '<p class="desc">' + escapeHtml(desc) + '</p>' +
+          (videoUrl ? '<a href="' + escapeAttr(videoUrl) + '" target="_blank" rel="noopener" class="play-btn" style="margin-top:4px;">Abrir enlace directo ↗</a>' : '') +
+        '</div>';
+    }
+
     function buildPlayer(src) {
       const wrap = document.getElementById('playerWrap');
       wrap.innerHTML = '';
-      const ytId = getYouTubeId(src);
+      if (!src) return;
 
+      const ytId = getYouTubeId(src);
       if (ytId) {
         buildYouTubePlayer(wrap, ytId, src);
         return;
       }
 
-      const embed = getEmbedUrl(src); // aquí solo puede caer Vimeo
-      if (embed) {
+      const vimeoMatch = src.match(/vimeo\.com\/(\d+)/);
+      if (vimeoMatch) {
         const iframe = document.createElement('iframe');
-        iframe.src = embed;
-        iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
-        iframe.allowFullscreen = true;
+        iframe.src = 'https://player.vimeo.com/video/' + vimeoMatch[1] + '?playsinline=1';
+        iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen';
+        iframe.setAttribute('allowfullscreen', '');
+        iframe.setAttribute('webkitallowfullscreen', '');
+        iframe.setAttribute('mozallowfullscreen', '');
+        iframe.referrerPolicy = 'strict-origin-when-cross-origin';
         wrap.appendChild(iframe);
         return;
       }
 
-      // Reproductor propio para MP4 / enlaces directos
+      // Aviso temprano de contenido mixto: en TV esto falla siempre y sin
+      // ningún mensaje de error visible para el usuario, así que lo detectamos
+      // nosotros mismos antes de intentar reproducir.
+      if (isMixedContent(src)) {
+        showPlayerError(
+          wrap,
+          'Este video no se puede reproducir aquí',
+          'El enlace usa http:// en una página https://. Los navegadores de TV (Apple TV, Android TV, Smart TV) bloquean esto siempre. Sube el video a un enlace https:// para solucionarlo.',
+          src
+        );
+        return;
+      }
+
+      // ---- Reproductor de video propio (MP4 / HLS / enlaces directos) ----
+      // Se usan los controles NATIVOS del navegador (atributo "controls") en
+      // vez de botones hechos a mano: es la única forma de garantizar que el
+      // control remoto de cualquier TV (foco por D-pad) pueda pausar, mover
+      // la barra de progreso, cambiar volumen y entrar a pantalla completa.
       const video = document.createElement('video');
-      video.src = src;
+      video.controls = true;
       video.playsInline = true;
+      video.setAttribute('playsinline', ''); // Safari / iOS / tvOS
+      video.setAttribute('webkit-playsinline', ''); // iOS antiguo
+      video.setAttribute('x5-playsinline', ''); // navegadores basados en X5 (algunos TV box Android)
+      video.setAttribute('crossorigin', 'anonymous');
+      video.preload = 'metadata';
+      video.poster = '';
+
+      const mime = guessMimeType(src);
+      const source = document.createElement('source');
+      source.src = src;
+      source.type = mime;
+      video.appendChild(source);
 
       const overlay = document.createElement('div');
       overlay.className = 'player-overlay';
+      overlay.setAttribute('tabindex', '0');
+      overlay.setAttribute('role', 'button');
+      overlay.setAttribute('aria-label', 'Reproducir video');
       overlay.innerHTML = '<span>▶</span>';
-
-      const bar = document.createElement('div');
-      bar.className = 'controls-bar';
-      bar.innerHTML =
-        '<div class="progress-bar"><div class="progress-fill"></div></div>' +
-        '<div class="controls-row">' +
-          '<button data-act="play">▶</button>' +
-          '<button data-act="mute">🔊</button>' +
-          '<input type="range" min="0" max="1" step="0.05" value="1" data-act="volume">' +
-          '<span class="time-label" data-act="time">00:00 / 00:00</span>' +
-          '<button data-act="fullscreen" style="margin-left:auto">⛶</button>' +
-        '</div>';
 
       wrap.appendChild(video);
       wrap.appendChild(overlay);
-      wrap.appendChild(bar);
 
-      const playBtn = bar.querySelector('[data-act=play]');
-      const muteBtn = bar.querySelector('[data-act=mute]');
-      const volumeInput = bar.querySelector('[data-act=volume]');
-      const timeLabel = bar.querySelector('[data-act=time]');
-      const progressBar = bar.querySelector('.progress-bar');
-      const progressFill = bar.querySelector('.progress-fill');
-      const fullscreenBtn = bar.querySelector('[data-act=fullscreen]');
+      function startPlayback() {
+        const p = video.play();
+        if (p && typeof p.catch === 'function') {
+          p.then(function () {
+            overlay.classList.add('hidden');
+          }).catch(function () {
+            // Algunos navegadores de TV exigen una interacción más directa;
+            // dejamos el overlay visible para que el usuario pueda reintentar
+            // con el control remoto (Enter/OK sobre el overlay enfocado).
+          });
+        } else {
+          overlay.classList.add('hidden');
+        }
+      }
+      overlay.addEventListener('click', startPlayback);
+      overlay.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13) {
+          e.preventDefault();
+          startPlayback();
+        }
+      });
+      video.addEventListener('play', function () { overlay.classList.add('hidden'); });
+      video.addEventListener('pause', function () { overlay.classList.remove('hidden'); });
+      video.addEventListener('ended', function () { overlay.classList.remove('hidden'); });
 
-      function fmt(s) {
-        if (!isFinite(s)) return '00:00';
-        const m = Math.floor(s / 60).toString().padStart(2, '0');
-        const sec = Math.floor(s % 60).toString().padStart(2, '0');
-        return m + ':' + sec;
-      }
-      function togglePlay() {
-        if (video.paused) { video.play(); overlay.classList.add('hidden'); playBtn.textContent = '⏸'; }
-        else { video.pause(); overlay.classList.remove('hidden'); playBtn.textContent = '▶'; }
-      }
-      video.addEventListener('click', togglePlay);
-      overlay.addEventListener('click', togglePlay);
-      playBtn.addEventListener('click', togglePlay);
-      video.addEventListener('ended', function () { overlay.classList.remove('hidden'); playBtn.textContent = '▶'; });
-      video.addEventListener('timeupdate', function () {
-        progressFill.style.width = (video.duration ? (video.currentTime / video.duration) * 100 : 0) + '%';
-        timeLabel.textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
-      });
-      progressBar.addEventListener('click', function (e) {
-        const rect = progressBar.getBoundingClientRect();
-        const ratio = (e.clientX - rect.left) / rect.width;
-        if (video.duration) video.currentTime = ratio * video.duration;
-      });
-      muteBtn.addEventListener('click', function () {
-        video.muted = !video.muted;
-        muteBtn.textContent = video.muted ? '🔇' : '🔊';
-      });
-      volumeInput.addEventListener('input', function (e) {
-        video.volume = Number(e.target.value);
-        video.muted = Number(e.target.value) === 0;
-        muteBtn.textContent = video.muted ? '🔇' : '🔊';
-      });
-      fullscreenBtn.addEventListener('click', function () {
-        if (document.fullscreenElement) document.exitFullscreen();
-        else wrap.requestFullscreen();
+      // Si el archivo no se puede reproducir (códec no soportado, enlace
+      // roto, CORS, etc.) mostramos un mensaje claro en vez de una pantalla
+      // negra silenciosa, que es lo que suele pasar en TV.
+      video.addEventListener('error', function () {
+        showPlayerError(
+          wrap,
+          'Video no disponible para reproducir aquí',
+          'Este televisor/dispositivo no pudo reproducir el archivo. La causa más común es un formato o códec no compatible: usa MP4 (H.264 + AAC) para máxima compatibilidad con TV.',
+          src
+        );
       });
     }
 
